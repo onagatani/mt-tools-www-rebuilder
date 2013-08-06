@@ -1,0 +1,125 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Getopt::Long qw(:config posix_default no_ignore_case gnu_compat);
+use WWW::Mechanize;
+use Pod::Usage;
+use URI;
+use FindBin;
+
+GetOptions(
+    "mt_uri=s"      => \my $mt_uri,
+    "username=s"    => \my $username,
+    "password=s"    => \my $password,
+    "blog_id=s"     => \my $blog_id,
+    "type=s"        => \my $type,
+    "template_id=s" => \my $template_id,
+);
+
+pod2usage() if !$mt_uri && !$username && !$password && !$blog_id;
+
+do_task();
+
+sub do_task {
+
+    my $uri = URI->new($mt_uri) or die $@;
+
+    my $mech = WWW::Mechanize->new( autocheck => 1 );
+    $mech->get($uri);
+    $mech->form_number(1);
+    $mech->set_fields(
+        username => $username,
+        password => $password,
+        checkbox => undef,
+    );
+    $mech->submit;
+    $mech->get($uri);
+
+    my $magic_token = get_value($mech, 'magic_token');
+
+    my %query_form;
+
+    if ($template_id && $type){
+        my $mode = $type eq 'archive' ? 'publish_archive_templates' : 'publish_index_templates';
+
+        %query_form = (
+            '__mode'      => $mode,
+            '_type'       => 'template',
+            'return_args' => sprintf('list_template&blog_id=%s',$blog_id),
+            'id'          => $template_id,
+            'blog_id'     => $blog_id,
+            'magic_token' => $magic_token,
+            'action_name' => undef,
+            'itemset_action_input' => undef,
+            'plugin_action_selector' => '0', 
+        );
+    }
+    else {
+        %query_form = (
+            '__mode'  => 'rebuild_confirm',
+            'blog_id' => $blog_id,
+        );
+        $uri->query_form(%query_form);
+        $mech->get($uri);
+        my $rebuild_type = get_value($mech, 'type');
+
+        %query_form = (
+            '__mode'        => 'start_rebuild',
+            'blog_id'       => $blog_id,
+            'next'          => 0,
+            'total_entries' => undef,
+            'total_pages'   => undef,
+            'total_cats'    => undef,
+            'type'          => $rebuild_type,
+        );
+    }
+
+    $uri->query_form(%query_form);
+    $mech->get($uri);
+
+    my $loop_counter = 0;
+
+    while (my $content = $mech->content) {
+        $loop_counter++;
+        $content =~ m{window.location='(.*?)'} or last;
+        my $next_url = $uri->scheme. '://'. $uri->host . $1;
+        $mech->get($next_url);
+        last if $loop_counter > 100;
+    }
+}
+
+sub get_value {
+    my ($mech, $param) = @_;
+    for my $form ($mech->forms){
+        if (my $value = $form->param($param) ) {
+            return $value;
+        }
+    }
+}
+
+1;
+__END__
+
+=encoding utf-8
+
+=head1 NAME
+
+www-rebuilder
+
+=head1 DESCRIPTION
+
+Rebuilding on the command line from a client PC
+
+=head1 SYNOPSIS
+
+www-rebuilder [options]
+
+www-rebuilder --mt_uri=http://example.com/cgi-bin/mt/mt.fcgi --username=XXXX --password=XXXX --template_id=1 --blog_id=1
+
+ Options:
+   -username MovableType Login User Name
+   -password MovableType Login Password
+   -blog_id BlogID
+   -mt_uri URL to mt.cgi
+   -template_id TemplateID
+   -type archive or index
