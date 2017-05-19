@@ -14,6 +14,8 @@ GetOptions(
     "blog_id=s"     => \my $blog_id,
     "type=s"        => \my $type,
     "template_id=s" => \my $template_id,
+    "basic_user=s"  => \my $basic_user,
+    "basic_pass=s"  => \my $basic_pass,
 );
 
 pod2usage() if !$mt_uri && !$username && !$password && !$blog_id;
@@ -25,6 +27,7 @@ sub do_task {
     my $uri = URI->new($mt_uri) or die $@;
 
     my $mech = WWW::Mechanize->new( autocheck => 1 );
+    $mech->credentials( $basic_user, $basic_pass ) if $basic_user && $basic_pass;
     $mech->get($uri);
     $mech->form_number(1);
     $mech->set_fields(
@@ -77,14 +80,10 @@ sub do_task {
     $uri->query_form(%query_form);
     $mech->get($uri);
 
-    my $loop_counter = 0;
-
     while (my $content = $mech->content) {
-        $loop_counter++;
         $content =~ m{window.location='(.*?)'} or last;
         my $next_url = $uri->scheme. '://'. $uri->host . $1;
         $mech->get($next_url);
-        last if $loop_counter > 100;
     }
 }
 
@@ -123,3 +122,4 @@ www-rebuilder --mt_uri=http://example.com/cgi-bin/mt/mt.fcgi --username=XXXX --p
    -mt_uri URL to mt.cgi
    -template_id TemplateID
    -type archive or index
+   -basic_user and -basic_pass credentials to be used for HTTP Basic authentication
